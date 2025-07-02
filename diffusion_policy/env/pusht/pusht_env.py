@@ -129,31 +129,34 @@ class PushTEnv(gym.Env):
         # print(block_geom)
         goal_red_body = self._get_goal_pose_body(self.goal_red_pose)
         goal_red_geom = pymunk_to_shapely(goal_red_body, self.block.shapes)
-        block_geom = pymunk_to_shapely(self.block, self.block.shapes)
-
-
-        intersection_red_area = goal_red_geom.intersection(block_geom).area
-        print(intersection_red_area)
-        goal_red_area = goal_red_geom.area
-        coverage_red = intersection_red_area / goal_red_area
-
-        reward_red  = np.clip(coverage_red / self.success_threshold, 0, 1)
-        self.red_done = True if (reward_red == 1) else False
+        # block_geom = pymunk_to_shapely(self.block, self.block.shapes)
+        # print(block_geom.area)
+        if not self.red_done:
+            intersection_red_area = goal_red_geom.intersection(block_geom).area
+            # print(intersection_red_area)
+            goal_red_area = goal_red_geom.area
+            coverage_red = intersection_red_area / goal_red_area
+            print(f"The coverage of the red area is {coverage_red}")# print(coverage_red)
+            reward_red  = np.clip(coverage_red / self.success_threshold, 0, 1)
+            self.red_done = True if (reward_red == 1) else False
         
         intersection_area = goal_geom.intersection(block_geom).area
+        # print(intersection_area)
         goal_area = goal_geom.area
         coverage = intersection_area / goal_area
-        print(coverage)    
+        # print(coverage)    
         reward = np.clip(coverage / self.success_threshold, 0, 1)
 
         done =  (self.red_done) and (coverage > self.success_threshold)
-        print(done)
+        # print(done)
         observation = self._get_obs()
         info = self._get_info()
         
-        if reward_red:
+        if self.red_done:
             print("RED is done onto gray")
-            reward = reward_red
+            # reward = reward_red 
+        else:
+            reward = 0
 
         return observation, reward, done, info
 
@@ -319,7 +322,7 @@ class PushTEnv(gym.Env):
         self.space.damping = 0
         self.teleop = False
         self.render_buffer = list()
-        
+        self.red_done = False
         # Add walls.
         walls = [
             self._add_segment((5, 506), (5, 5), 2),
