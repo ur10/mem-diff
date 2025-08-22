@@ -6,8 +6,49 @@ import pygame
 import pymunk
 import pymunk.pygame_util
 from pymunk.vec2d import Vec2d
+import shapely.geometry as sg
 import cv2
 from pymunk_override import DrawOptions
+import collections
+# import clock
+
+def pymunk_to_shapely(body, shapes):
+    geoms = list()
+    for shape in shapes:
+        if isinstance(shape, pymunk.shapes.Poly):
+            
+            print(body.position)
+            verts = [Vec2d(v[0], v[1]) + body.position for v in shape.get_vertices()]
+            verts += [verts[0]]
+            geoms.append(sg.Polygon(verts))
+            # print(verts)
+        # verts = []
+        #     for v in shape.get_vertices():
+        #         x,y = v.rotated(shape.body.angle) + shape.body.position        
+        #         vector = Vec2d(x,y)
+        #         verts.append(vector)
+        #     verts += [verts[0]]
+        #     geoms.append(sg.Polygon(verts))
+        else:
+            raise RuntimeError(f'Unsupported shape type {type(shape)}')
+    geom = sg.MultiPolygon(geoms)
+    return geom
+
+COLORS = {
+    "WHITE":   (255, 255, 255),
+    "BLACK":   (0, 0, 0),
+    "RED":     (255, 0, 0),
+    "GREEN":   (0, 255, 0),
+    "BLUE":    (0, 0, 255),
+    "YELLOW":  (255, 255, 0),
+    "CYAN":    (0, 255, 255),
+    "MAGENTA": (255, 0, 255),
+    "GRAY":    (128, 128, 128),
+    "ORANGE":  (255, 165, 0),
+    "PURPLE":  (128, 0, 128),
+    "BROWN":   (165, 42, 42)
+}
+
 
 class MultiPushEnv(gym.Env):
     metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 10}
@@ -18,7 +59,8 @@ class MultiPushEnv(gym.Env):
             block_cog=None, damping=None,
             render_action=True,
             render_size=96,
-            reset_to_state=None):
+            reset_to_state=None,
+            signal_idx = 0):
         # super().__init__()
         # self.render_size = render_size
         # self.num_blocks = num_blocks
@@ -34,13 +76,20 @@ class MultiPushEnv(gym.Env):
         self.render_size = render_size
         self.sim_hz = 100
         self.red_done = False
-        self.goal_poses = [(80,200), (180,200), (280, 200)]
+        self.goal_poses = [(180,300), (280,300), (380, 300)]
+        
+        self.signal_circle_poses = [(180,150), (280,150), (380, 150)]
+        self.signal_circle_radius = 20
+        self.signal_idx = signal_idx
+        self.current_goal_pose = np.array([self.goal_poses[self.signal_idx][0], self.goal_poses[self.signal_idx][1], 0])
+
         # Local controller params.
         self.k_p, self.k_v = 100, 20    # PD control.z
         self.control_hz = self.metadata['video.frames_per_second']
         # legcay set_state for data compatibility
         self.legacy = legacy
 
+        self.signal_occured = False
         # agent_pos, block_pos, block_angle
         self.observation_space = spaces.Box(
             low=np.array([0,0,0,0,0], dtype=np.float64),
@@ -48,7 +97,7 @@ class MultiPushEnv(gym.Env):
             shape=(5,),
             dtype=np.float64
         )
-
+        self.box_color_dict = {"box1":COLORS["MAGENTA"], "box2":COLORS["ORANGE"], "box3":COLORS["BROWN"]}
         # positional goal for agent
         self.action_space = spaces.Box(
             low=np.array([0,0], dtype=np.float64),
@@ -78,10 +127,17 @@ class MultiPushEnv(gym.Env):
         self.latest_action = None
         self.reset_to_state = reset_to_state
 
+        self.max_score = 50 * 100
+        self.success_threshold = 0.35 
+        self.agent = {}
+        self.boxes = []
+        self.current_box = pymunk.Body()
 
     def reset(self):
         # self.blocks = np.random.rand(self.num_blocks, 2) * self.render_size
         self._setup()
+        # self.current_box = self.boxes[0]
+        # print(f"The current box is {self.current_box}")
         # return self.blocks.flatten()
     
     def _add_segment(self, a, b, radius):
@@ -104,10 +160,30 @@ class MultiPushEnv(gym.Env):
         body = pymunk.Body(mass, inertia)
         body.position = position
         shape = pymunk.Poly.create_box(body, (height, width))
+        print(f"The shape of the created box is {shape}")
         shape.color = pygame.Color('LightSlateGray')
         self.space.add(body, shape)
         return body
     
+    def _get_obs(self):
+        obs = np.array(
+            tuple(self.agent.position) \
+            + tuple(self.current_box.position) \
+            + (self.current_box.angle % (2 * np.pi),))
+        return obs
+    
+    def _get_goal_pose_body(self, pose):
+        mass = 1
+        inertia = pymunk.moment_for_box(mass, (50, 50))
+        body = pymunk.Body(mass, inertia)
+        body.position = pose[:2].tolist()
+        body.angle = 0
+
+        # Add a shape to the body
+        shape = pymunk.Poly.create_box(body, (50, 50))  # Create a box shape
+        # self.space.add(body, shape)  # Add the body and shape to the space
+        return body
+
     def _setup(self):
         self.space = pymunk.Space()
         self.space.gravity = 0, 0
@@ -122,13 +198,18 @@ class MultiPushEnv(gym.Env):
             self._add_segment((506, 5), (506, 506), 2),
             self._add_segment((5, 506), (506, 506), 2)
         ]
-        self.space.add(*walls)
-        self.add_box((150, 300), 40,40)
-        self.add_box((250, 300), 40,40)
-        self.add_box((350, 300), 40,40) # Add different color names down the line
-        self.add_circle((250, 350),15)
+        # self.space.add(*walls)
+        self.current_box = self.add_box((250, 400), 50,50)
+        # self.boxes.append(self.add_box((250, 300), 40,40))
+        # self.boxes.append(self.add_box((350, 300), 40,40)) # Add different color names down the line
+        self.agent = self.add_circle((250, 350),15)
 
-    def render_frame(self,mode):
+    def change_circle_color(self, circle_idx, screen):
+        pygame.draw.circle(screen,self.box_color_dict[f"box{circle_idx+1}"],
+                              (self.signal_circle_poses[circle_idx][0], self.signal_circle_poses[circle_idx][1]),
+                               self.signal_circle_radius)
+
+    def render_frame(self,mode, flash_color=False):
         if self.window is None and mode == "human":
             pygame.init()
             pygame.display.init()
@@ -144,11 +225,15 @@ class MultiPushEnv(gym.Env):
 
 
         # Draw the 3 goal poses.
-        for goal_pose in self.goal_poses:
-            print(goal_pose)
-            rect = pygame.Rect(goal_pose[0]-50, goal_pose[1] - 50,50,50)
-            pygame.draw.rect(canvas, (255, 165, 0), rect=rect)
-
+        for i, goal_pose in enumerate(self.goal_poses):
+            # print(goal_pose)
+            rect = pygame.Rect(goal_pose[0], goal_pose[1],50,50)
+            pygame.draw.rect(canvas, self.box_color_dict[f"box{i+1}"], rect=rect)
+            pygame.draw.circle(canvas,COLORS["BLACK"],
+                              (self.signal_circle_poses[i][0], self.signal_circle_poses[i][1]),
+                               self.signal_circle_radius)
+        if flash_color:
+            self.change_circle_color(self.signal_idx, canvas)
         # Draw agent and block.
         self.space.debug_draw(draw_options)
 
@@ -175,13 +260,176 @@ class MultiPushEnv(gym.Env):
                     color=(255,0,0), markerType=cv2.MARKER_CROSS,
                     markerSize=marker_size, thickness=thickness)
         return img
+    def teleop_agent(self):
+        TeleopAgent = collections.namedtuple('TeleopAgent', ['act'])
+        def act(obs):
+            act = None
+            mouse_position = pymunk.pygame_util.from_pygame(Vec2d(*pygame.mouse.get_pos()), self.screen)
+            if self.teleop or (mouse_position - self.agent.position).length < 30:
+                self.teleop = True
+                act = mouse_position
+            return act
+        return TeleopAgent(act)
+    
+    def step(self, action):
+        dt = 1.0 / self.sim_hz
+        self.n_contact_points = 0
+        n_steps = self.sim_hz // self.control_hz
+        if action is not None:
+            self.latest_action = action
+            for i in range(n_steps):
+                # Step PD control.
+                # self.agent.velocity = self.k_p * (act - self.agent.position)    # P control works too.
+                acceleration = self.k_p * (action - self.agent.position) + self.k_v * (Vec2d(0, 0) - self.agent.velocity)
+                self.agent.velocity += acceleration * dt
 
+                # Step physics.
+                self.space.step(dt)
+
+        # compute reward
+
+        goal_body = self._get_goal_pose_body(self.current_goal_pose)
+        # print(goal_body.shapes)
+        goal_geom = pymunk_to_shapely(goal_body, self.current_box.shapes)
+        # print(self.current_box.shapes)
+        block_geom = pymunk_to_shapely(self.current_box, self.current_box.shapes)
+        # print(block_geom)
+        # goal_red_body = self._get_goal_pose_body(self.goal_red_pose)
+        # goal_red_geom = pymunk_to_shapely(goal_red_body, self.block.shapes)
+        # # block_geom = pymunk_to_shapely(self.block, self.block.shapes)
+        # # print(block_geom.area)
+        # if not self.red_done:
+        # intersection_red_area = goal_red_geom.intersection(block_geom).area
+        #     # print(intersection_red_area)
+        #     goal_red_area = goal_red_geom.area
+        #     coverage_red = intersection_red_area / goal_red_area
+        #     print(f"The coverage of the blue area is {coverage_red}")# print(coverage_red)
+        #     reward_red  = np.clip(coverage_red / self.success_threshold, 0, 1)
+        #     self.red_done = True if (reward_red == 1) else False
+        
+        intersection_area = goal_geom.intersection(block_geom).area
+        # # print(intersection_area)
+        goal_area = goal_geom.area
+        coverage = intersection_area / goal_area
+        print(f"The current coverage is {coverage}")    
+        reward = np.clip(coverage / self.success_threshold, 0, 1)
+
+        # done =  (self.red_done) and (coverage > self.success_threshold)
+        # print(done)
+        observation = self._get_obs()
+        # info = self._get_info()
+
+        if reward == 1:
+             return observation, reward, True, None
+        else:
+            return observation, reward, False, None
+        # if self.red_done:
+        #     print("RED is done onto greem")
+        #     # reward = reward_red 
+        # else:
+        #     reward = 0
+        # reward = 1
+        # done = False # !!! CHANGE THIS!!!!
+        return observation, reward, done, None
 
 def main():
-    push_env = MultiPushEnv()
+    # push_env = MultiPushEnv(signal_idx=np.random.randint(0,3))
+    # agent = push_env.teleop_agent()
+    # clock = pygame.time.Clock()
     while True:
+        push_env = MultiPushEnv(signal_idx=np.random.randint(0,3))
+        agent = push_env.teleop_agent()
+        clock = pygame.time.Clock()
         push_env.reset()
+        # push_env.signal_idx = np.random.randint(0,3)
         push_env.render_frame(mode="human")
+        episode = list()
+        push_env.signal_occured = False
+        # record in seed order, starting with 0
+        # seed = replay_buffer.n_episodes
+        # print(f'starting seed {seed}')
 
+        # set seed for env
+        # push_env.seed(seed)
+        
+        # reset push_ev and get observations (including info and render for recording)
+        # obs = push_env.reset()
+        # info = push_env._get_info()
+        img = push_env.render_frame(mode='human')
+        
+        # loop state
+        retry = False
+        pause = False
+        done = False
+        plan_idx = 0
+        pygame.display.set_caption(f'plan_idx:{plan_idx}')
+        # step-level while loop
+        while not done:
+            # process keypress events
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        # hold Space to pause
+                        plan_idx += 1
+                        pygame.display.set_caption(f'plan_idx:{plan_idx}')
+                        pause = True
+                    elif event.key == pygame.K_r:
+                        # press "R" to retry
+                        retry=True
+                    elif event.key == pygame.K_q:
+                        # press "Q" to exit
+                        exit(0)
+                if event.type == pygame.KEYUP:
+                    if event.key == pygame.K_SPACE:
+                        pause = False
+
+            # handle control flow
+            if retry:
+                break
+            if pause:
+                continue
+            
+            # get action from mouse
+            # None if mouse is not close to the agent
+            obs = []
+            act = agent.act(obs)
+            # if not act is None:
+            #     # teleop started
+            #     # state dim 2+3
+            #     state = np.concatenate([info['pos_agent'], info['block_pose']])
+            #     # discard unused information such as visibility mask and agent pos
+            #     # for compatibility
+            #     keypoint = obs.reshape(2,-1)[0].reshape(-1,2)[:9]
+            #     data = {
+            #         'img': img,
+            #         'state': np.float32(state),
+            #         'keypoint': np.float32(keypoint),
+            #         'action': np.float32(act),
+            #         'n_contacts': np.float32([info['n_contacts']])
+            #     }
+            #     episode.append(data)
+                
+            # step push_env and render
+            obs, reward, done, info = push_env.step(act)
+            # done = False
+            # print(f"The current observation is {obs}")
+            img = push_env.render_frame(mode='human')
+            if push_env.signal_occured == False:
+                for i in range(30):
+                    img = push_env.render_frame(mode='human', flash_color=True)
+                    clock.tick(20)
+                    push_env.signal_occured = True
+            # regulate control frequency
+            clock.tick(10)
+        # if not retry:
+        #     # save episode buffer to replay buffer (on disk)
+        #     data_dict = dict()
+        #     for key in episode[0].keys():
+        #         data_dict[key] = np.stack(
+        #             [x[key] for x in episode])
+        #     replay_buffer.add_episode(data_dict, compressors='disk')
+        #     print(f'saved seed {seed}')
+        # else:
+        #     print(f'retry seed {seed}')
 if __name__=="__main__":
     main()
