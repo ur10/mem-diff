@@ -109,7 +109,7 @@ class PushTEnv(gym.Env):
 
     def step(self, action):
         dt = 1.0 / self.sim_hz
-        self.n_contact_points = 0
+        self.  = 0
         n_steps = self.sim_hz // self.control_hz
         if action is not None:
             self.latest_action = action
@@ -136,7 +136,7 @@ class PushTEnv(gym.Env):
             # print(intersection_red_area)
             goal_red_area = goal_red_geom.area
             coverage_red = intersection_red_area / goal_red_area
-            print(f"The coverage of the red area is {coverage_red}")# print(coverage_red)
+            print(f"The coverage of the blue area is {coverage_red}")# print(coverage_red)
             reward_red  = np.clip(coverage_red / self.success_threshold, 0, 1)
             self.red_done = True if (reward_red == 1) else False
         
@@ -153,7 +153,7 @@ class PushTEnv(gym.Env):
         info = self._get_info()
         
         if self.red_done:
-            print("RED is done onto gray")
+            print("RED is done onto greem")
             # reward = reward_red 
         else:
             reward = 0

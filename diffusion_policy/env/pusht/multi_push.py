@@ -8,19 +8,21 @@ import pymunk.pygame_util
 from pymunk.vec2d import Vec2d
 import shapely.geometry as sg
 import cv2
+# import zarr
 from pymunk_override import DrawOptions
 import collections
 # import clock
 
 def pymunk_to_shapely(body, shapes):
     geoms = list()
+    vertices = list()
     for shape in shapes:
-        if isinstance(shape, pymunk.shapes.Poly):
-            
-            print(body.position)
-            verts = [Vec2d(v[0], v[1]) + body.position for v in shape.get_vertices()]
+        if isinstance(shape, pymunk.shapes.Poly):            
+            # print(shape.get_vertices())
+            verts = [body.local_to_world(v) for v in shape.get_vertices()]
             verts += [verts[0]]
             geoms.append(sg.Polygon(verts))
+            vertices += [verts]
             # print(verts)
         # verts = []
         #     for v in shape.get_vertices():
@@ -31,8 +33,9 @@ def pymunk_to_shapely(body, shapes):
         #     geoms.append(sg.Polygon(verts))
         else:
             raise RuntimeError(f'Unsupported shape type {type(shape)}')
+    # print(geoms[0])
     geom = sg.MultiPolygon(geoms)
-    return geom
+    return geom, vertices
 
 COLORS = {
     "WHITE":   (255, 255, 255),
@@ -72,13 +75,13 @@ class MultiPushEnv(gym.Env):
 
         self._seed = None
         self.seed()
-        self.window_size = ws = 512  # The size of the PyGame window
+        self.window_size = ws = 520   # The size of the PyGame window
         self.render_size = render_size
         self.sim_hz = 100
         self.red_done = False
-        self.goal_poses = [(180,300), (280,300), (380, 300)]
+        self.goal_poses = [(50,200), (250,200), (450, 200)]
         
-        self.signal_circle_poses = [(180,150), (280,150), (380, 150)]
+        self.signal_circle_poses = [(50,80), (250,80), (450, 80)]
         self.signal_circle_radius = 20
         self.signal_idx = signal_idx
         self.current_goal_pose = np.array([self.goal_poses[self.signal_idx][0], self.goal_poses[self.signal_idx][1], 0])
@@ -105,7 +108,7 @@ class MultiPushEnv(gym.Env):
             shape=(2,),
             dtype=np.float64
         )
-
+ 
         self.block_cog = block_cog
         self.damping = damping
         self.render_action = render_action
@@ -128,7 +131,7 @@ class MultiPushEnv(gym.Env):
         self.reset_to_state = reset_to_state
 
         self.max_score = 50 * 100
-        self.success_threshold = 0.35 
+        self.success_threshold = 0.95 
         self.agent = {}
         self.boxes = []
         self.current_box = pymunk.Body()
@@ -160,7 +163,7 @@ class MultiPushEnv(gym.Env):
         body = pymunk.Body(mass, inertia)
         body.position = position
         shape = pymunk.Poly.create_box(body, (height, width))
-        print(f"The shape of the created box is {shape}")
+        # print(f"The shape of the created box is {shape}")
         shape.color = pygame.Color('LightSlateGray')
         self.space.add(body, shape)
         return body
@@ -174,13 +177,13 @@ class MultiPushEnv(gym.Env):
     
     def _get_goal_pose_body(self, pose):
         mass = 1
-        inertia = pymunk.moment_for_box(mass, (50, 50))
+        inertia = pymunk.moment_for_box(mass, (50, 70))
         body = pymunk.Body(mass, inertia)
         body.position = pose[:2].tolist()
         body.angle = 0
 
         # Add a shape to the body
-        shape = pymunk.Poly.create_box(body, (50, 50))  # Create a box shape
+        shape = pymunk.Poly.create_box(body, (50, 70))  # Create a box shape
         # self.space.add(body, shape)  # Add the body and shape to the space
         return body
 
@@ -199,10 +202,22 @@ class MultiPushEnv(gym.Env):
             self._add_segment((5, 506), (506, 506), 2)
         ]
         # self.space.add(*walls)
-        self.current_box = self.add_box((250, 400), 50,50)
+        self.current_box = self.add_box((250, 400), 50,70)
         # self.boxes.append(self.add_box((250, 300), 40,40))
         # self.boxes.append(self.add_box((350, 300), 40,40)) # Add different color names down the line
         self.agent = self.add_circle((250, 350),15)
+    
+    def _get_info(self):
+        n_steps = self.sim_hz // self.control_hz
+        # n_contact_points_per_step = int(np.ceil(self.n_contact_points / n_steps))
+        info = {
+            'pos_agent': np.array(self.agent.position),
+            'vel_agent': np.array(self.agent.velocity),
+            'block_pose': np.array(list(self.current_box.position) + [self.current_box.angle]),
+            'goal_pose': self.current_goal_pose,
+            # 'n_contacts': n_contact_points_per_step
+            }
+        return info
 
     def change_circle_color(self, circle_idx, screen):
         pygame.draw.circle(screen,self.box_color_dict[f"box{circle_idx+1}"],
@@ -227,7 +242,7 @@ class MultiPushEnv(gym.Env):
         # Draw the 3 goal poses.
         for i, goal_pose in enumerate(self.goal_poses):
             # print(goal_pose)
-            rect = pygame.Rect(goal_pose[0], goal_pose[1],50,50)
+            rect = pygame.Rect(goal_pose[0] - 25, goal_pose[1] - 35, 50, 70) #Expects the coordinates of the top left corner
             pygame.draw.rect(canvas, self.box_color_dict[f"box{i+1}"], rect=rect)
             pygame.draw.circle(canvas,COLORS["BLACK"],
                               (self.signal_circle_poses[i][0], self.signal_circle_poses[i][1]),
@@ -290,9 +305,9 @@ class MultiPushEnv(gym.Env):
 
         goal_body = self._get_goal_pose_body(self.current_goal_pose)
         # print(goal_body.shapes)
-        goal_geom = pymunk_to_shapely(goal_body, self.current_box.shapes)
+        goal_geom,_ = pymunk_to_shapely(goal_body, self.current_box.shapes)
         # print(self.current_box.shapes)
-        block_geom = pymunk_to_shapely(self.current_box, self.current_box.shapes)
+        block_geom,_ = pymunk_to_shapely(self.current_box, self.current_box.shapes)
         # print(block_geom)
         # goal_red_body = self._get_goal_pose_body(self.goal_red_pose)
         # goal_red_geom = pymunk_to_shapely(goal_red_body, self.block.shapes)
@@ -308,9 +323,10 @@ class MultiPushEnv(gym.Env):
         #     self.red_done = True if (reward_red == 1) else False
         
         intersection_area = goal_geom.intersection(block_geom).area
-        # # print(intersection_area)
         goal_area = goal_geom.area
         coverage = intersection_area / goal_area
+        # print(intersection_area, goal_area)
+
         print(f"The current coverage is {coverage}")    
         reward = np.clip(coverage / self.success_threshold, 0, 1)
 
@@ -318,11 +334,11 @@ class MultiPushEnv(gym.Env):
         # print(done)
         observation = self._get_obs()
         # info = self._get_info()
-
+        info = self._get_info()
         if reward == 1:
-             return observation, reward, True, None
+             return observation, reward, True, info
         else:
-            return observation, reward, False, None
+            return observation, reward, False, info
         # if self.red_done:
         #     print("RED is done onto greem")
         #     # reward = reward_red 
@@ -331,6 +347,8 @@ class MultiPushEnv(gym.Env):
         # reward = 1
         # done = False # !!! CHANGE THIS!!!!
         return observation, reward, done, None
+    
+        
 
 def main():
     # push_env = MultiPushEnv(signal_idx=np.random.randint(0,3))
@@ -353,8 +371,8 @@ def main():
         # push_env.seed(seed)
         
         # reset push_ev and get observations (including info and render for recording)
-        # obs = push_env.reset()
-        # info = push_env._get_info()
+        obs = push_env.reset()
+        info = push_env._get_info()
         img = push_env.render_frame(mode='human')
         
         # loop state
@@ -393,34 +411,52 @@ def main():
             # None if mouse is not close to the agent
             obs = []
             act = agent.act(obs)
-            # if not act is None:
-            #     # teleop started
-            #     # state dim 2+3
-            #     state = np.concatenate([info['pos_agent'], info['block_pose']])
-            #     # discard unused information such as visibility mask and agent pos
-            #     # for compatibility
-            #     keypoint = obs.reshape(2,-1)[0].reshape(-1,2)[:9]
-            #     data = {
-            #         'img': img,
-            #         'state': np.float32(state),
-            #         'keypoint': np.float32(keypoint),
-            #         'action': np.float32(act),
-            #         'n_contacts': np.float32([info['n_contacts']])
-            #     }
-            #     episode.append(data)
-                
-            # step push_env and render
-            obs, reward, done, info = push_env.step(act)
-            # done = False
-            # print(f"The current observation is {obs}")
-            img = push_env.render_frame(mode='human')
             if push_env.signal_occured == False:
-                for i in range(30):
-                    img = push_env.render_frame(mode='human', flash_color=True)
-                    clock.tick(20)
+                for i in range(80):
+                    
+                    img = push_env.render_frame(mode='human', flash_color=((i%4)==0))
+                    obs, reward, done, info = push_env.step(act)
+                    state = np.concatenate([info['pos_agent'], info['block_pose']])
+                    data = {
+                    'img': img,
+                    'state': np.float32(state),
+                    # 'keypoint': np.float32(keypoint),
+                    'action': np.float32(act),
+                    # 'n_contacts': np.float32([info['n_contacts']])
+                    }
+                    episode.append(data)
+                    clock.tick(10)
                     push_env.signal_occured = True
             # regulate control frequency
             clock.tick(10)
+            # if not act is None:
+            #     # teleop started
+            #     # state dim 2+3
+                
+            #     # discard unused information such as visibility mask and agent pos
+            #     # for compatibility
+            #     keypoint = obs.reshape(2,-1)[0].reshape(-1,2)[:9]
+            obs, reward, done, info = push_env.step(act)
+            # info = push_env._get_info()
+            state = np.concatenate([info['pos_agent'], info['block_pose']])
+            img = push_env.render_frame(mode='human')
+
+            data = {
+                'img': img,
+                'state': np.float32(state),
+                # 'keypoint': np.float32(keypoint),
+                'action': np.float32(act),
+                # 'n_contacts': np.float32([info['n_contacts']])
+            }
+            episode.append(data)
+                
+            # step push_env and render
+            
+            # done = False
+            # print(f"The current observation is {obs}")
+            
+            tick = False
+           
         # if not retry:
         #     # save episode buffer to replay buffer (on disk)
         #     data_dict = dict()
