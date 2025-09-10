@@ -109,7 +109,7 @@ class PushTEnv(gym.Env):
 
     def step(self, action):
         dt = 1.0 / self.sim_hz
-        self.  = 0
+        self.n_contact_points = 0
         n_steps = self.sim_hz // self.control_hz
         if action is not None:
             self.latest_action = action

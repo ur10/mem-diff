@@ -12,7 +12,7 @@ import cv2
 # import zarr
 from pymunk_override import DrawOptions
 import collections
-from replay_buffer import ReplayBuffer
+from diffusion_policy.common.replay_buffer import ReplayBuffer
 # import clock
 
 def pymunk_to_shapely(body, shapes):
@@ -415,12 +415,11 @@ def main(output):
             # get action from mouse
             # None if mouse is not close to the agent
             obs = []
-            
+            act = agent.act(obs)
             if push_env.signal_occured == False:
                 for i in range(80):
                     
                     img = push_env.render_frame(mode='human', flash_color=((i%4)==0))
-                    act = agent.act(obs)
                     obs, reward, done, info = push_env.step(act)
                     state = np.concatenate([info['pos_agent'], info['block_pose']])
                     data = {
@@ -430,8 +429,7 @@ def main(output):
                     'action': np.float32(act),
                     # 'n_contacts': np.float32([info['n_contacts']])
                     }
-                    if act is not None:
-                        episode.append(data)
+                    episode.append(data)
                     clock.tick(10)
                     push_env.signal_occured = True
             # regulate control frequency
@@ -443,7 +441,6 @@ def main(output):
             #     # discard unused information such as visibility mask and agent pos
             #     # for compatibility
             #     keypoint = obs.reshape(2,-1)[0].reshape(-1,2)[:9]
-            act = agent.act(obs)
             obs, reward, done, info = push_env.step(act)
             # info = push_env._get_info()
             state = np.concatenate([info['pos_agent'], info['block_pose']])
@@ -456,9 +453,7 @@ def main(output):
                 'action': np.float32(act),
                 # 'n_contacts': np.float32([info['n_contacts']])
             }
-            if act is not None:
-                episode.append(data)
-        
+            episode.append(data)
                 
             # step push_env and render
             
@@ -466,15 +461,12 @@ def main(output):
             # print(f"The current observation is {obs}")
             
             tick = False
-        print(len(episode))
         if not retry:
                     # save episode buffer to replay buffer (on disk)
                     data_dict = dict()
                     for key in episode[0].keys():
-                        print(key)
                         data_dict[key] = np.stack(
                             [x[key] for x in episode])
-                        print('here')
                     replay_buffer.add_episode(data_dict, compressors='disk')
                     print(f'saved seed {seed}')
         else:
