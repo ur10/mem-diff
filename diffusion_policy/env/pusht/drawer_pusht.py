@@ -54,7 +54,7 @@ COLORS = {
     "BROWN":   (165, 42, 42)
 }
 
-
+COLOR_PALLETE = [{"1":(128, 128, 128), "2": (255, 165, 0) }, {"2":(128, 128, 128), "1": (255, 165, 0)}]
 class MultiPushEnv(gym.Env):
     metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 10}
     reward_range = (0., 1.)
@@ -65,7 +65,8 @@ class MultiPushEnv(gym.Env):
             render_action=True,
             render_size=96,
             reset_to_state=None,
-            signal_idx = 0):
+            signal_pos_idx = 0, 
+            signal_color_idx = 0):
         # super().__init__()
         # self.render_size = render_size
         # self.num_blocks = num_blocks
@@ -81,13 +82,16 @@ class MultiPushEnv(gym.Env):
         self.render_size = render_size
         self.sim_hz = 100
         self.red_done = False
-        self.goal_poses = [(150,100), (150,450)]
-        self.block_position = [(150, 200), (150, 350)]
-        self.signal_circle_poses = [(150,80), (250,80), (450, 80)]
+        self.goal_poses = [(150,100), (150,350)]
+        self.block_position = [(150, 120), (150, 420)]
+        self.signal_circle_poses = [(450,80), (450,80), (450, 80)]
         self.signal_circle_radius = 20
-        self.signal_idx = signal_idx
-        self.current_goal_pose = np.array([self.goal_poses[self.signal_idx][0], self.goal_poses[self.signal_idx][1], 0])
-
+        self.signal_pos_idx = signal_pos_idx
+        self.signal_color_idx = signal_color_idx
+        self.current_goal_pose = np.array([450,80, 0])
+        self.chosen_palet = COLOR_PALLETE[signal_color_idx]
+        self.box_contacted = [False, False]
+        print(self.chosen_palet)
         # Local controller params.
         self.k_p, self.k_v = 100, 20    # PD control.z
         self.control_hz = self.metadata['video.frames_per_second']
@@ -102,7 +106,7 @@ class MultiPushEnv(gym.Env):
             shape=(5,),
             dtype=np.float64
         )
-        self.box_color_dict = {"box1":COLORS["MAGENTA"], "box2":COLORS["ORANGE"], "box3":COLORS["BROWN"]}
+        self.box_color_dict = {"box1":COLORS["MAGENTA"], "box2":COLORS["CYAN"], "box3":COLORS["BROWN"]}
         # positional goal for agent
         self.action_space = spaces.Box(
             low=np.array([0,0], dtype=np.float64),
@@ -159,17 +163,26 @@ class MultiPushEnv(gym.Env):
         self.space.add(body, shape)
         return body
 
-    def add_box(self, position:tuple, height, width):
+    def add_box(self, position:tuple, height, width, color):
         mass = 1
         inertia = pymunk.moment_for_box(mass, (height, width))
         body = pymunk.Body(mass, inertia)
         body.position = position
         shape = pymunk.Poly.create_box(body, (height, width))
-        # print(f"The shape of the created box is {shape}")
-        
-        shape.color = pygame.Color('LightSlateGray')
+        shape.color = pygame.Color(color)
+        shape.outline_color = None  # Remove boundary/outline 
         self.space.add(body, shape)
         return body
+        # mass = 1
+        # inertia = pymunk.moment_for_box(mass, (height, width))
+        # body = pymunk.Body(mass, inertia)
+        # body.position = position
+        # shape = pymunk.Poly.create_box(body, (height, width))
+        # # print(f"The shape of the created box is {shape}")
+        
+        # shape.color = pygame.Color(self.box_color_dict[f"box{self.signal_pos_idx}"])
+        # self.space.add(body, shape)
+        # return body
     
     def _get_obs(self):
         obs = np.array(
@@ -205,10 +218,18 @@ class MultiPushEnv(gym.Env):
             self._add_segment((5, 506), (506, 506), 2)
         ]
         # self.space.add(*walls)
-        self.current_box = self.add_box(self.block_position[self.signal_idx], 50,70)
+        boxes = []
+        self.boxes = [
+            self.add_box(self.block_position[0], 50, 70, COLORS["MAGENTA"]),
+            self.add_box(self.block_position[1], 50, 70, COLORS["CYAN"])
+        ]
+        self.current_box = self.boxes[self.signal_pos_idx]
+       
+        # self.current_box = self.add_box(self.block_position[1], 50,70, COLORS["CYAN"])
+
         # self.boxes.append(self.add_box((250, 300), 40,40))
         # self.boxes.append(self.add_box((350, 300), 40,40)) # Add different color names down the line
-        self.agent = self.add_circle((250, 350),15)
+        self.agent = self.add_circle((450, 350),15)
     
     def _get_info(self):
         n_steps = self.sim_hz // self.control_hz
@@ -226,6 +247,20 @@ class MultiPushEnv(gym.Env):
         pygame.draw.circle(screen,self.box_color_dict[f"box{circle_idx+1}"],
                               (self.signal_circle_poses[circle_idx][0], self.signal_circle_poses[circle_idx][1]),
                                self.signal_circle_radius)
+    def check_change_color(self):
+        for i, goal_pose in enumerate(self.goal_poses):
+            if (abs(self.agent.position[0] - goal_pose[0]) < 60.0 and abs(self.agent.position[1] - goal_pose[1]) < 60.0):
+                shape = self.space.shapes[i]
+                shape.color = pygame.Color(self.chosen_palet[f"{i+1}"])
+            else:
+                shape = self.space.shapes[i]
+                # print((shape.body.position - self.agent.position).length)
+                if abs((shape.body.position - self.agent.position).length) > 40 and (self.box_contacted[i] == False):
+                    
+                    shape.color = pygame.Color(self.box_color_dict[f"box{i+1}"])    
+                else:
+                    self.box_contacted[i] = True
+                    shape.color = pygame.Color(self.chosen_palet[f"{i+1}"])
 
     def render_frame(self,mode, flash_color=False):
         if self.window is None and mode == "human":
@@ -240,43 +275,85 @@ class MultiPushEnv(gym.Env):
         self.screen = canvas
 
         draw_options = DrawOptions(canvas)
-
-
-        # Draw the 3 goal poses.
+        rect = pygame.Rect(self.signal_circle_poses[0][0] - 25, self.signal_circle_poses[0][1] - 35, 50, 70) #Expects the coordinates of the top left corner
+        pygame.draw.rect(canvas, self.chosen_palet[f"{self.signal_pos_idx+1}"], rect=rect)
+        # pygame.draw.circle(canvas,self.chosen_palet[f"{self.signal_pos_idx+1}"],
+        #                       (self.signal_circle_poses[0][0], self.signal_circle_poses[0][1]),
+        #                        self.signal_circle_radius)
         for i, goal_pose in enumerate(self.goal_poses):
-            # print(goal_pose)
-            rect = pygame.Rect(goal_pose[0] - 75, goal_pose[1] - 100, 150, 200) #Expects the coordinates of the top left corner
 
             s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
-            s.fill((*self.box_color_dict[f"box{i+1}"], 120))  # Add alpha value (128 for 50% transparency)
-            canvas.blit(s, (goal_pose[0] - 75, goal_pose[1] - 100))
-            pygame.draw.circle(canvas,COLORS["BLACK"],
-                              (self.signal_circle_poses[i][0], self.signal_circle_poses[i][1]),
-                               self.signal_circle_radius)
-
-        if (abs(self.agent.position[0] - self.goal_poses[0][0]) < 60.0 and abs(self.agent.position[1] - self.goal_poses[0][1]) < 60.0):
-            # print(self.agent.position[0])
-            s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
-            s.fill((*self.box_color_dict[f"box{self.signal_idx+1}"], 0))  # Add alpha value (128 for 50% transparency)
-            for shape in self.space.shapes:
-                if isinstance(shape, pymunk.shapes.Poly):
-                    print("Change")
-                    shape.color = pygame.Color((100, 100, 100, 250))  # Change block color here
-            canvas.blit(s, (self.current_goal_pose[0] - 75, self.current_goal_pose[1] - 100))
-        else:
-            s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
-            s.fill((*self.box_color_dict[f"box{self.signal_idx+1}"], 120))  # Add alpha value (128 for 50% transparency)
-            canvas.blit(s, (self.current_goal_pose[0] - 75, self.current_goal_pose[1] - 100))
+            s.fill((*self.box_color_dict[f"box{i+1}"], 250))  # Add alpha value (128 for 50% transparency)
             
-            for shape in self.space.shapes:
-                if isinstance(shape.body, pymunk.shapes.Poly):
-                    print("Vhasn")
-                    shape.color = pygame.Color((100, 100, 100, 0))  # Change block color here
+            canvas.blit(s, (goal_pose[0] - 75, goal_pose[1] - 100))
+
+        self.check_change_color()
+        # for i, goal_pose in enumerate(self.goal_poses):n 
+        #     if (abs(self.agent.position[0] - goal_pose[0]) < 60.0 and abs(self.agent.position[1] - goal_pose[1]) < 60.0):
+        #         # print(self.agent.position[0])
+        #         s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
+        #         s.fill((*self.box_color_dict[f"box{i+1}"], 0))  # Add alpha value (128 for 50% transparency)
+
+        #         if i == self.signal_pos_idx:
+        #             for shape in self.space.shapes:
+        #                 if shape.body.position[1] == self.block_position[1]:
+        #                     print(f"Change{i}")
+        #                     shape.color = pygame.Color((COLORS["GREEN"]))  # Change block color here
+        #         canvas.blit(s, (self.current_goal_pose[0] - 75, self.current_goal_pose[1] - 100))
+        #     else:
+        #         s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
+        #         s.fill((*self.box_color_dict[f"box{i+1}"], 250))  # Add alpha value (128 for 50% transparency)
+        #         canvas.blit(s, (self.current_goal_pose[0] - 75, self.current_goal_pose[1] - 100))
+                
+        #         for shape in self.space.shapes:
+        #             if isinstance(shape, pymunk.shapes.Poly):
+        #                 print("Vhasn")
+        #                 shape.color = pygame.Color(self.box_color_dict[f"box{self.signal_pos_idx+1}"])  # Change block color here
             # pygame.draw.rect(canvas, self.box_color_dict[f"box{i+1}"], rect=rect)
            
-        if flash_color:
-            self.change_circle_color(self.signal_idx, canvas)
-        # Draw agent and block.
+
+        # Draw the 3 goal poses.
+        # for i, goal_pose in enumerate(self.goal_poses):
+        #     # print(goal_pose)
+        #     rect = pygame.Rect(goal_pose[0] - 75, goal_pose[1] - 100, 150, 200) #Expects the coordinates of the top left corner
+
+        #     s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
+        #     s.fill((*self.box_color_dict[f"box{i+1}"], 255))  # Add alpha value (128 for 50% transparency)
+        #     canvas.blit(s, (goal_pose[0] - 75, goal_pose[1] - 100))
+        #     pygame.draw.circle(canvas,COLORS["BLACK"],
+        #                       (self.signal_circle_poses[i][0], self.signal_circle_poses[i][1]),
+        #                        self.signal_circle_radius)
+
+        #     # print(self.space.shapes)
+        #     if (abs(self.agent.position[0] - self.goal_poses[i][0]) < 60.0 and abs(self.agent.position[1] - self.goal_poses[i][1]) < 60.0):
+        #         # print(self.agent.position[0])
+        #         s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
+        #         s.fill((*self.box_color_dict[f"box{i+1}"], 0))  # Add alpha value (128 for 50% transparency)
+
+        #         if i == self.signal_pos_idx:
+        #             shape = self.space.shapes[i]
+        #             shape.color = pygame.Color(COLORS["GREEN"])
+        #             # for shape in self.space.shapes:
+        #             #     if isinstance(shape, pymunk.shapes.Poly):
+        #             #         print("Change")
+        #             #         shape.color = pygame.Color((COLORS["GREEN"]))  # Change block color here
+        #         canvas.blit(s, (self.current_goal_pose[0] - 75, self.current_goal_pose[1] - 100))
+        #     else:
+        #         s = pygame.Surface((150, 200), pygame.SRCALPHA)  # Create a surface with alpha channel
+        #         s.fill((*self.box_color_dict[f"box{i+1}"], 120))  # Add alpha value (128 for 50% transparency)
+        #         canvas.blit(s, (self.current_goal_pose[0] - 75, self.current_goal_pose[1] - 100))
+
+        #         shape = self.space.shapes[i]
+        #         shape.color = pygame.Color(self.box_color_dict[f"box{self.signal_pos_idx+1}"])                 
+                # for shape in self.space.shapes:
+                #     if isinstance(shape, pymunk.shapes.Poly):
+                #         print("Vhasn")
+                #         shape.color = pygame.Color(self.box_color_dict[f"box{self.signal_pos_idx+1}"])  # Change block color here
+        #     # pygame.draw.rect(canvas, self.box_color_dict[f"box{i+1}"], rect=rect)
+           
+        # if flash_color:
+        #     self.change_circle_color(self.signal_color_idx, canvas)
+        # # Draw agent and block.
         
 
         self.space.debug_draw(draw_options)
@@ -304,6 +381,7 @@ class MultiPushEnv(gym.Env):
                     color=(255,0,0), markerType=cv2.MARKER_CROSS,
                     markerSize=marker_size, thickness=thickness)
         return img
+
     def teleop_agent(self):
         TeleopAgent = collections.namedtuple('TeleopAgent', ['act'])
         def act(obs):
@@ -356,7 +434,7 @@ class MultiPushEnv(gym.Env):
         coverage = intersection_area / goal_area
         # print(intersection_area, goal_area)
 
-        # print(f"The current coverage is {coverage}")    
+        print(f"The current coverage is {coverage}")    
         reward = np.clip(coverage / self.success_threshold, 0, 1)
 
         # done =  (self.red_done) and (coverage > self.success_threshold)
@@ -381,17 +459,17 @@ class MultiPushEnv(gym.Env):
 @click.command()
 @click.option('-o', '--output', required=True)
 def main(output):
-    # push_env = MultiPushEnv(signal_idx=np.random.randint(0,3))
+    # push_env = MultiPushEnv(signal_pos_idx=np.random.randint(0,3))
     # agent = push_env.teleop_agent()
     # clock = pygame.time.Clock()
     while True:
         replay_buffer = ReplayBuffer.create_from_path(output, mode='a')
         seed = replay_buffer.n_episodes
-        push_env = MultiPushEnv(signal_idx=np.random.randint(0,2))
+        push_env = MultiPushEnv(signal_pos_idx=np.random.randint(0,2), signal_color_idx=np.random.randint(0,2))
         agent = push_env.teleop_agent()
         clock = pygame.time.Clock()
         push_env.reset()
-        # push_env.signal_idx = np.random.randint(0,3)
+        # push_env.signal_pos_idx = np.random.randint(0,3)
         push_env.render_frame(mode="human")
         episode = list()
         push_env.signal_occured = False
