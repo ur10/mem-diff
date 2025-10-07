@@ -71,6 +71,7 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
         # configure dataset
         dataset: BaseImageDataset
         dataset = hydra.utils.instantiate(cfg.task.dataset)
+        print(f"The dataset is {dataset}")
         assert isinstance(dataset, BaseImageDataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
@@ -289,6 +290,8 @@ class TrainDiffusionUnetHybridWorkspace(BaseWorkspace):
     config_path=str(pathlib.Path(__file__).parent.parent.joinpath("config")), 
     config_name=pathlib.Path(__file__).stem)
 def main(cfg):
+    print('here' ,flush=True)
+    print(cfg, flush=True)
     workspace = TrainDiffusionUnetHybridWorkspace(cfg)
     workspace.run()
 

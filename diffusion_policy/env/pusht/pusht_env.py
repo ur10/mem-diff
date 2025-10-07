@@ -41,7 +41,6 @@ class PushTEnv(gym.Env):
         self.window_size = ws = 512  # The size of the PyGame window
         self.render_size = render_size
         self.sim_hz = 100
-        self.red_done = False
         # Local controller params.
         self.k_p, self.k_v = 100, 20    # PD control.z
         self.control_hz = self.metadata['video.frames_per_second']
@@ -126,37 +125,15 @@ class PushTEnv(gym.Env):
         goal_body = self._get_goal_pose_body(self.goal_pose)
         goal_geom = pymunk_to_shapely(goal_body, self.block.shapes)
         block_geom = pymunk_to_shapely(self.block, self.block.shapes)
-        # print(block_geom)
-        goal_red_body = self._get_goal_pose_body(self.goal_red_pose)
-        goal_red_geom = pymunk_to_shapely(goal_red_body, self.block.shapes)
-        # block_geom = pymunk_to_shapely(self.block, self.block.shapes)
-        # print(block_geom.area)
-        if not self.red_done:
-            intersection_red_area = goal_red_geom.intersection(block_geom).area
-            # print(intersection_red_area)
-            goal_red_area = goal_red_geom.area
-            coverage_red = intersection_red_area / goal_red_area
-            print(f"The coverage of the blue area is {coverage_red}")# print(coverage_red)
-            reward_red  = np.clip(coverage_red / self.success_threshold, 0, 1)
-            self.red_done = True if (reward_red == 1) else False
-        
+
         intersection_area = goal_geom.intersection(block_geom).area
-        # print(intersection_area)
         goal_area = goal_geom.area
         coverage = intersection_area / goal_area
-        # print(coverage)    
         reward = np.clip(coverage / self.success_threshold, 0, 1)
+        done = coverage > self.success_threshold
 
-        done =  (self.red_done) and (coverage > self.success_threshold)
-        # print(done)
         observation = self._get_obs()
         info = self._get_info()
-        
-        if self.red_done:
-            print("RED is done onto greem")
-            # reward = reward_red 
-        else:
-            reward = 0
 
         return observation, reward, done, info
 
@@ -220,17 +197,9 @@ class PushTEnv(gym.Env):
         # Draw goal pose.
         goal_body = self._get_goal_pose_body(self.goal_pose)
         for shape in self.block.shapes:
-
             goal_points = [pymunk.pygame_util.to_pygame(goal_body.local_to_world(v), draw_options.surface) for v in shape.get_vertices()]
             goal_points += [goal_points[0]]
             pygame.draw.polygon(canvas, self.goal_color, goal_points)
-
-        goal_red_body = self._get_goal_pose_body(self.goal_red_pose)
-        for shape in self.block.shapes:
-
-            goal_points = [pymunk.pygame_util.to_pygame(goal_red_body.local_to_world(v), draw_options.surface) for v in shape.get_vertices()]
-            goal_points += [goal_points[0]]
-            pygame.draw.polygon(canvas, self.goal_red_color, goal_points)
 
         # Draw agent and block.
         self.space.debug_draw(draw_options)
@@ -322,7 +291,7 @@ class PushTEnv(gym.Env):
         self.space.damping = 0
         self.teleop = False
         self.render_buffer = list()
-        self.red_done = False
+        
         # Add walls.
         walls = [
             self._add_segment((5, 506), (5, 5), 2),
@@ -336,10 +305,7 @@ class PushTEnv(gym.Env):
         self.agent = self.add_circle((256, 400), 15)
         self.block = self.add_tee((256, 300), 0)
         self.goal_color = pygame.Color('LightGreen')
-        self.goal_pose = np.array([126,126,np.pi/4])  # x, y, theta (in radians)
-
-        self.goal_red_color = pygame.Color('RoyalBlue')
-        self.goal_red_pose = np.array([256,256,np.pi/2])  # x, y, theta (in radians)
+        self.goal_pose = np.array([256,256,np.pi/4])  # x, y, theta (in radians)
 
         # Add collision handling
         self.collision_handeler = self.space.add_collision_handler(0, 0)

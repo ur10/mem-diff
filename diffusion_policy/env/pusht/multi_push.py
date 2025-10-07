@@ -10,9 +10,9 @@ from pymunk.vec2d import Vec2d
 import shapely.geometry as sg
 import cv2
 # import zarr
-from pymunk_override import DrawOptions
+from diffusion_policy.env.pusht.pymunk_override import DrawOptions
 import collections
-from replay_buffer import ReplayBuffer
+from diffusion_policy.env.pusht.replay_buffer import ReplayBuffer
 # import clock
 
 def pymunk_to_shapely(body, shapes):
@@ -96,12 +96,20 @@ class MultiPushEnv(gym.Env):
 
         self.signal_occured = False
         # agent_pos, block_pos, block_angle
-        self.observation_space = spaces.Box(
-            low=np.array([0,0,0,0,0], dtype=np.float64),
-            high=np.array([ws,ws,ws,ws,np.pi*2], dtype=np.float64),
-            shape=(5,),
-            dtype=np.float64
-        )
+        self.observation_space = spaces.Dict({
+            'image': spaces.Box(
+                low=0,
+                high=1,
+                shape=(3,render_size,render_size),
+                dtype=np.float32
+            ),
+            'agent_pos': spaces.Box(
+                low=0,
+                high=ws,
+                shape=(2,),
+                dtype=np.float32
+            )
+        })
         self.box_color_dict = {"box1":COLORS["MAGENTA"], "box2":COLORS["ORANGE"], "box3":COLORS["BROWN"]}
         # positional goal for agent
         self.action_space = spaces.Box(
@@ -144,6 +152,8 @@ class MultiPushEnv(gym.Env):
         # self.current_box = self.boxes[0]
         # print(f"The current box is {self.current_box}")
         # return self.blocks.flatten()
+        observation = self._get_obs()
+        return observation
     
     def _add_segment(self, a, b, radius):
         shape = pymunk.Segment(self.space.static_body, a, b, radius)
@@ -171,10 +181,17 @@ class MultiPushEnv(gym.Env):
         return body
     
     def _get_obs(self):
-        obs = np.array(
-            tuple(self.agent.position) \
-            + tuple(self.current_box.position) \
-            + (self.current_box.angle % (2 * np.pi),))
+        img = self.render_frame(mode='rgb_array')
+
+        agent_pos = np.array(self.agent.position)
+        img_obs = np.moveaxis(img.astype(np.float32) / 255, -1, 0)
+        
+        obs = {
+            'image': img_obs,
+            'agent_pos': agent_pos
+        }
+        # print((obs['image'].shape))
+        # print((obs['agent_pos'].shape))
         return obs
     
     def _get_goal_pose_body(self, pose):
@@ -277,6 +294,7 @@ class MultiPushEnv(gym.Env):
                     color=(255,0,0), markerType=cv2.MARKER_CROSS,
                     markerSize=marker_size, thickness=thickness)
         return img
+
     def teleop_agent(self):
         TeleopAgent = collections.namedtuple('TeleopAgent', ['act'])
         def act(obs):
@@ -287,7 +305,7 @@ class MultiPushEnv(gym.Env):
                 act = mouse_position
             return act
         return TeleopAgent(act)
-    
+
     def step(self, action):
         dt = 1.0 / self.sim_hz
         self.n_contact_points = 0
@@ -338,9 +356,11 @@ class MultiPushEnv(gym.Env):
         # info = self._get_info()
         info = self._get_info()
         if reward == 1:
-             return observation, reward, True, info
-        else:
-            return observation, reward, False, info
+            assert observation is not None, "env._get_obs() returned None"
+            assert info is not None, "env._get_info() returned None"
+            return observation, reward, True, info
+        # else:
+        #     return observation, reward, False, info
         # if self.red_done:
         #     print("RED is done onto greem")
         #     # reward = reward_red 
@@ -348,9 +368,11 @@ class MultiPushEnv(gym.Env):
         #     reward = 0
         # reward = 1
         # done = False # !!! CHANGE THIS!!!!
-        return observation, reward, done, None
+        assert observation is not None, "env._get_obs() returned None"
+        assert info is not None, "env._get_info() returned None"
+        return observation, reward, False, info
     
-        
+
 @click.command()
 @click.option('-o', '--output', required=True)
 def main(output):
@@ -479,15 +501,15 @@ def main(output):
                     print(f'saved seed {seed}')
         else:
             print(f'retry seed {seed}')
-        # if not retry:
-        #     # save episode buffer to replay buffer (on disk)
-        #     data_dict = dict()
-        #     for key in episode[0].keys():
-        #         data_dict[key] = np.stack(
-        #             [x[key] for x in episode])
-        #     replay_buffer.add_episode(data_dict, compressors='disk')
-        #     print(f'saved seed {seed}')
-        # else:
-        #     print(f'retry seed {seed}')
+        if not retry:
+            # save episode buffer to replay buffer (on disk)
+            data_dict = dict()
+            for key in episode[0].keys():
+                data_dict[key] = np.stack(
+                    [x[key] for x in episode])
+            replay_buffer.add_episode(data_dict, compressors='disk')
+            print(f'saved seed {seed}')
+        else:
+            print(f'retry seed {seed}')
 if __name__=="__main__":
     main()

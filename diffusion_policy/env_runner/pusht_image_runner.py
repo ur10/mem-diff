@@ -176,6 +176,7 @@ class PushTImageRunner(BaseImageRunner):
             # start rollout
             obs = env.reset()
             past_action = None
+
             policy.reset()
 
             pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval PushtImageRunner {chunk_idx+1}/{n_chunks}", 

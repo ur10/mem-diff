@@ -22,6 +22,7 @@ class PushTImageDataset(BaseImageDataset):
             ):
         
         super().__init__()
+        print(f"The zarr path is - {zarr_path}")
         self.replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=['img', 'state', 'action'])
         val_mask = get_val_mask(

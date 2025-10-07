@@ -120,9 +120,9 @@ task:
     pad_before: 1
     seed: 42
     val_ratio: 0.02
-    zarr_path: data/pusht/pusht_cchi_v7_replay.zarr
+    zarr_path: /home/ur10/mem-diff/data/multi_data_iter2.zarr
   env_runner:
-    _target_: diffusion_policy.env_runner.pusht_image_runner.PushTImageRunner
+    _target_: diffusion_policy.env_runner.pusht_image_runner_multi.PushTImageRunnerMulti
     fps: 10
     legacy_test: true
     max_steps: 300
