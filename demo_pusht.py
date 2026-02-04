@@ -78,7 +78,7 @@ def main(output, render_size, control_hz):
                 break
             if pause:
                 continue
-            
+
             # get action from mouse
             # None if mouse is not close to the agent
             act = agent.act(obs)
@@ -118,3 +118,4 @@ def main(output, render_size, control_hz):
 
 if __name__ == "__main__":
     main()
+

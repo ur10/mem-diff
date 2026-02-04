@@ -41,7 +41,7 @@ class PushTEnv(gym.Env):
         self.window_size = ws = 512  # The size of the PyGame window
         self.render_size = render_size
         self.sim_hz = 100
-        # Local controller params.
+        # Local controller params. 
         self.k_p, self.k_v = 100, 20    # PD control.z
         self.control_hz = self.metadata['video.frames_per_second']
         # legcay set_state for data compatibility

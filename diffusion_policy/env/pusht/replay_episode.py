@@ -3,7 +3,6 @@ import click
 import cv2
 import numpy as np
 
-
 def replay_episode(replay_buffer, render_size=(256,256)):
     """
     Replay and record episodes in PushTKeypointsEnv with teleop agent.
@@ -22,10 +21,10 @@ def replay_episode(replay_buffer, render_size=(256,256)):
     # Define video writer
     out_path = "/home/ur10/rollout.mp4"
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    fps = 20  # or set to your episode's frame rate
+    fps = 10  # or set to your episode's frame rate
     out = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
 
-    for img in resized_imgs[:-110]:
+    for img in resized_imgs:
         # Ensure image is uint8
         if img.dtype != np.uint8:
             img = (img * 255).astype(np.uint8)
@@ -35,10 +34,9 @@ def replay_episode(replay_buffer, render_size=(256,256)):
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         # print(img)
         out.write(img)
-    for i in range(80):
-        out.write(resized_imgs[-110])
+    # for i in range(80):
+    #     out.write(resized_imgs[-110])
     out.release()
-
 
 
 @click.command()
@@ -55,3 +53,4 @@ def main(output):
 
 if __name__ == "__main__":
     main()
+

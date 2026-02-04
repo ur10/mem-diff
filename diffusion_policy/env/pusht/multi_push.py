@@ -85,7 +85,7 @@ class MultiPushEnv(gym.Env):
         
         self.signal_circle_poses = [(50,80), (250,80), (450, 80)]
         self.signal_circle_radius = 20
-        self.signal_idx = signal_idx
+        self.signal_idx = np.random.randint(0,3)
         self.current_goal_pose = np.array([self.goal_poses[self.signal_idx][0], self.goal_poses[self.signal_idx][1], 0])
 
         # Local controller params.
@@ -133,7 +133,7 @@ class MultiPushEnv(gym.Env):
         self.window = None
         self.clock = None
         self.screen = None
-
+        self.blink_counter = 0
         self.space = None
         self.teleop = None
         self.render_buffer = None
@@ -149,6 +149,7 @@ class MultiPushEnv(gym.Env):
     def reset(self):
         # self.blocks = np.random.rand(self.num_blocks, 2) * self.render_size
         self._setup()
+        self.blink_counter = 0  # Reset blink_counter here so it flashes at the start of each episode
         # self.current_box = self.boxes[0]
         # print(f"The current box is {self.current_box}")
         # return self.blocks.flatten()
@@ -243,13 +244,18 @@ class MultiPushEnv(gym.Env):
                               (self.signal_circle_poses[circle_idx][0], self.signal_circle_poses[circle_idx][1]),
                                self.signal_circle_radius)
 
-    def render_frame(self,mode, flash_color=False):
+    def render_frame(self,mode):
+        flash_color = False
+        # print(f"The blink counter is {self.blink_counter}")
         if self.window is None and mode == "human":
             pygame.init()
             pygame.display.init()
             self.window = pygame.display.set_mode((self.window_size, self.window_size))
         if self.clock is None and mode == "human":
             self.clock = pygame.time.Clock()
+        if self.blink_counter < 80:
+            flash_color = True
+            
 
         canvas = pygame.Surface((self.window_size, self.window_size))
         canvas.fill((255, 255, 255))
@@ -268,6 +274,8 @@ class MultiPushEnv(gym.Env):
                                self.signal_circle_radius)
         if flash_color:
             self.change_circle_color(self.signal_idx, canvas)
+            # print("Changing  color")
+
         # Draw agent and block.
         self.space.debug_draw(draw_options)
 
@@ -293,7 +301,11 @@ class MultiPushEnv(gym.Env):
                 cv2.drawMarker(img, coord,
                     color=(255,0,0), markerType=cv2.MARKER_CROSS,
                     markerSize=marker_size, thickness=thickness)
+        self.blink_counter += 1
         return img
+
+    def render(self, mode):
+        return self.render_frame(mode)
 
     def teleop_agent(self):
         TeleopAgent = collections.namedtuple('TeleopAgent', ['act'])
@@ -347,7 +359,7 @@ class MultiPushEnv(gym.Env):
         coverage = intersection_area / goal_area
         # print(intersection_area, goal_area)
 
-        print(f"The current coverage is {coverage}")    
+        # print(f"The current coverage is {coverage}")    
         reward = np.clip(coverage / self.success_threshold, 0, 1)
 
         # done =  (self.red_done) and (coverage > self.success_threshold)
@@ -379,15 +391,17 @@ def main(output):
     # push_env = MultiPushEnv(signal_idx=np.random.randint(0,3))
     # agent = push_env.teleop_agent()
     # clock = pygame.time.Clock()
+    plan_idx = 0
     while True:
         replay_buffer = ReplayBuffer.create_from_path(output, mode='a')
+        print(f"Index count is {replay_buffer.n_episodes}")
         seed = replay_buffer.n_episodes
         push_env = MultiPushEnv(signal_idx=np.random.randint(0,3))
         agent = push_env.teleop_agent()
         clock = pygame.time.Clock()
         push_env.reset()
         # push_env.signal_idx = np.random.randint(0,3)
-        push_env.render_frame(mode="human")
+        push_env.render(mode="human")
         episode = list()
         push_env.signal_occured = False
         # record in seed order, starting with 0
@@ -400,13 +414,13 @@ def main(output):
         # reset push_ev and get observations (including info and render for recording)
         obs = push_env.reset()
         info = push_env._get_info()
-        img = push_env.render_frame(mode='human')
+        img = push_env.render(mode='human')
         
         # loop state
         retry = False
         pause = False
         done = False
-        plan_idx = 0
+        
         pygame.display.set_caption(f'plan_idx:{plan_idx}')
         # step-level while loop
         while not done:
@@ -438,24 +452,24 @@ def main(output):
             # None if mouse is not close to the agent
             obs = []
             
-            if push_env.signal_occured == False:
-                for i in range(80):
+            # if push_env.signal_occured == False:
+            #     for i in range(80):
                     
-                    img = push_env.render_frame(mode='human', flash_color=((i%4)==0))
-                    act = agent.act(obs)
-                    obs, reward, done, info = push_env.step(act)
-                    state = np.concatenate([info['pos_agent'], info['block_pose']])
-                    data = {
-                    'img': img,
-                    'state': np.float32(state),
-                    # 'keypoint': np.float32(keypoint),
-                    'action': np.float32(act),
-                    # 'n_contacts': np.float32([info['n_contacts']])
-                    }
-                    if act is not None:
-                        episode.append(data)
-                    clock.tick(10)
-                    push_env.signal_occured = True
+            #         img = push_env.render_frame(mode='human')
+            #         act = agent.act(obs)
+            #         obs, reward, done, info = push_env.step(act)
+            #         state = np.concatenate([info['pos_agent'], info['block_pose']])
+            #         data = {
+            #         'img': img,
+            #         'state': np.float32(state),
+            #         # 'keypoint': np.float32(keypoint),
+            #         'action': np.float32(act),
+            #         # 'n_contacts': np.float32([info['n_contacts']])
+            #         }
+            #         if act is not None:
+            #             episode.append(data)
+            #         clock.tick(10)
+            #         push_env.signal_occured = True
             # regulate control frequency
             clock.tick(10)
             # if not act is None:
@@ -470,6 +484,7 @@ def main(output):
             # info = push_env._get_info()
             state = np.concatenate([info['pos_agent'], info['block_pose']])
             img = push_env.render_frame(mode='human')
+            # print(f"The current action is {img}")
 
             data = {
                 'img': img,
@@ -480,6 +495,7 @@ def main(output):
             }
             if act is not None:
                 episode.append(data)
+                
         
                 
             # step push_env and render
@@ -508,8 +524,10 @@ def main(output):
                 data_dict[key] = np.stack(
                     [x[key] for x in episode])
             replay_buffer.add_episode(data_dict, compressors='disk')
+            plan_idx += 1
             print(f'saved seed {seed}')
         else:
             print(f'retry seed {seed}')
+
 if __name__=="__main__":
     main()
