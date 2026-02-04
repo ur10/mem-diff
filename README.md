@@ -15,3 +15,6 @@
 
  
 
+  - `agent_counting` -
+ 
+    <img width="521" height="556" alt="image" src="https://github.com/user-attachments/assets/c093b3a1-5e66-4265-88fc-d38895aa9d16"/>
